@@ -1,0 +1,13 @@
+# Render Blueprint: public real-time browser game
+services:
+  - type: web
+    name: ma-ha-rov
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
