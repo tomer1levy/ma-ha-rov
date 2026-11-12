@@ -69,7 +69,7 @@ const created = host.send('host:create', {});
 assert.equal(created.ok, true);
 const code = created.code;
 assert.equal(host.getState().phase, 'waiting');
-assert.equal(host.getState().totalRounds, 20, 'Twenty birthday dilemmas available by default');
+assert.equal(host.getState().totalRounds, 21, 'Twenty-one birthday dilemmas available by default');
 assert.ok(host.getState().players.length === 0);
 assert.match(host.getState().question?.question || '', /^$/, 'No question before start');
 const players = ['איתי','רוני','מיכל','ערן','רותם'].map(name => {
