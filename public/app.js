@@ -21,6 +21,7 @@
   let ready = false;
   let lastError = '';
   let toastTimer;
+  let serverOffsetMs = 0; // Client epoch minus server epoch, updated on room events
 
   const $ = (selector) => app.querySelector(selector);
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -60,10 +61,22 @@
     if (!players.length) return '<div class="no-players">השחקנים יופיעו כאן כשיצטרפו.</div>';
     return `<div>${players.map((p, i) => `<div class="score-row"><div><span class="rank">${i + 1}.</span><b>${esc(p.name)}</b>${!p.connected ? ' <span class="tiny-muted">(לא מחובר)</span>' : ''}${!compact && p.earned !== null && p.earned > 0 ? `<div class="tiny-muted">+${p.earned} בסבב האחרון</div>` : ''}</div><div class="score">${p.score}</div></div>`).join('')}</div>`;
   }
+  function updateCountdown() {
+    const label = document.getElementById('stage-timer');
+    const bar = document.getElementById('stage-progress');
+    if (!label || !bar || !state?.phaseEndsAt) return;
+    const remaining = Math.max(0, state.phaseEndsAt - (Date.now() - serverOffsetMs));
+    const seconds = Math.ceil(remaining / 1000);
+    label.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    label.classList.toggle('urgent', seconds <= 10);
+    bar.style.width = `${Math.min(100, remaining / (state.phaseDurationMs || 60000) * 100)}%`;
+  }
+  setInterval(updateCountdown, 200);
   function progress() {
     const label = { waiting: 'חדר המתנה', voting: 'בחירה אישית', guessing: 'הימור על התוצאות', results: 'חשיפת תוצאות', finished: 'סיום המשחק' }[state.phase];
     const seq = state.phase === 'waiting' ? 0 : state.phase === 'voting' ? 1 : state.phase === 'guessing' ? 2 : 3;
-    return `<div class="round-head"><div><div class="eyebrow">${state.phase === 'waiting' ? 'מתארגנים' : `סבב ${state.round} מתוך ${state.totalRounds}`}</div><span class="text-muted">${label}</span></div><div class="steps">${['בוחרים', 'מהמרים', 'מגלים'].map((x, i) => `<span class="step ${i + 1 === seq ? 'current' : i + 1 < seq ? 'done' : ''}">${x}</span>`).join('')}</div></div>`;
+    const countdown = state.phaseEndsAt ? `<div class="countdown"><div class="countdown-heading"><b>${state.phase === 'voting' ? 'נותר להצבעה' : 'נותר להימור'}</b><strong id="stage-timer" class="countdown-value" aria-label="זמן שנותר">1:00</strong></div><div class="countdown-track"><div id="stage-progress" class="countdown-fill"></div></div><div class="small text-muted">בתום הזמן המשחק ימשיך אוטומטית</div></div>` : '';
+    return `<div class="round-head"><div><div class="eyebrow">${state.phase === 'waiting' ? 'מתארגנים' : `סבב ${state.round} מתוך ${state.totalRounds}`}</div><span class="text-muted">${label}</span></div><div class="steps">${['בוחרים', 'מהמרים', 'מגלים'].map((x, i) => `<span class="step ${i + 1 === seq ? 'current' : i + 1 < seq ? 'done' : ''}">${x}</span>`).join('')}</div></div>${countdown}`;
   }
   function resultPanel() {
     if (!state?.result || !state.question) return '';
@@ -86,9 +99,9 @@
     if (isWaiting) {
       main = `<div class="eyebrow">כולם בפנים?</div><h1 class="hero">מוכנים לגלות<br>מה הרוב חושב?</h1><p class="lead">תנו לכולם לסרוק את הקוד ולהצטרף. לאחר מכן התחילו את המשחק.</p><div class="pills"><span class="pill">${plural(state.players.length, 'משתתף', 'משתתפים')} בחדר</span><span class="pill">${plural(state.totalRounds, 'שאלה', 'שאלות')}</span></div><div class="space-top"><button class="btn" data-action="next">התחל משחק <span aria-hidden="true">←</span></button></div>`;
     } else if (state.phase === 'voting') {
-      main = votingPanel(true) + `<div class="space-top"><div class="between"><b>הצביעו: ${state.votedCount} / ${state.players.length}</b><span class="small">אפשר להמתין לכולם</span></div><div class="progress"><div class="progress-fill" style="width:${state.players.length ? (100 * state.votedCount / state.players.length) : 0}%"></div></div><button class="btn full margin-top" data-action="lock" ${state.votedCount === 0 ? 'disabled' : ''}>סגור הצבעה ועבור להימורים</button></div>`;
+      main = votingPanel(true) + `<div class="space-top"><div class="between"><b>הצביעו: ${state.votedCount} / ${state.players.length}</b><span class="small">המעבר אוטומטי כעבור דקה</span></div><div class="progress"><div class="progress-fill" style="width:${state.players.length ? (100 * state.votedCount / state.players.length) : 0}%"></div></div><p class="small text-muted">עם סיום הדקה שלב ההימור יתחיל אוטומטית.</p></div>`;
     } else if (state.phase === 'guessing') {
-      main = `<div class="eyebrow">ההצבעות נסגרו — התוצאות עדיין סודיות</div><div class="question">כמה מתוך ${state.guessTotal} הצביעו ל־<span style="color:var(--purple)">${esc(state.question.a)}</span>?</div><p class="lead">כל משתתף מהמר על מספר האנשים שבחרו באפשרות א׳.</p><div class="between"><b>שלחו הימור: ${state.guessCount} / ${state.guessTotal}</b><span class="small">ההימור נשאר סודי</span></div><div class="progress"><div class="progress-fill" style="width:${state.guessTotal ? 100 * state.guessCount / state.guessTotal : 0}%"></div></div><button class="btn mint full margin-top" data-action="reveal">חשוף תוצאות וחלק ניקוד</button>`;
+      main = `<div class="eyebrow">ההצבעות נסגרו — התוצאות עדיין סודיות</div><div class="question">כמה מתוך ${state.guessTotal} הצביעו ל־<span style="color:var(--purple)">${esc(state.question.a)}</span>?</div><p class="lead">כל משתתף מהמר על מספר האנשים שבחרו באפשרות א׳.</p><div class="between"><b>שלחו הימור: ${state.guessCount} / ${state.guessTotal}</b><span class="small">ההימור נשאר סודי</span></div><div class="progress"><div class="progress-fill" style="width:${state.guessTotal ? 100 * state.guessCount / state.guessTotal : 0}%"></div></div><p class="small text-muted">התוצאות והניקוד ייחשפו אוטומטית בסיום הדקה.</p>`;
     } else if (state.phase === 'results') {
       main = `<div class="question">${esc(state.question.question)}</div>${resultPanel()}<button class="btn full space-top" data-action="next">${state.index + 1 >= state.totalRounds ? 'הצג תוצאות סופיות' : 'לשאלה הבאה ←'}</button>`;
     } else {
@@ -97,7 +110,7 @@
     }
     const left = `${base}${main}</section>${isWaiting ? `<section class="panel space-top"><div class="between"><h3>שאלות המשחק</h3><button class="btn tiny secondary" data-action="toggle-edit">${editing ? 'סגור עריכה' : 'ערוך שאלות'}</button></div>${editing ? `<p class="small">שאלה אחת בכל שורה, בפורמט: שאלה | אפשרות א׳ | אפשרות ב׳. אפשר לשים עד 100 שאלות.</p><textarea id="questions-draft" class="textarea" spellcheck="false">${esc(draft)}</textarea><div class="margin-top"><button class="btn tiny mint" data-action="save-questions">שמור שאלות</button></div>` : `<p class="small">${plural(state.totalRounds, 'שאלה מוכנה', 'שאלות מוכנות')}. אפשר להחליף את כולן לפני שמתחילים.</p>`}</section>` : ''}</main>`;
     const showQr = state.phase === 'waiting' || state.phase === 'voting';
-    const sidebar = `<aside><section class="panel"><h2>${showQr ? 'הצטרפות למשחק' : 'טבלת המובילים'}</h2>${showQr ? `<div class="center"><div class="label">קוד החדר</div><div class="code">${esc(code)}</div><img class="qr" alt="קוד QR להצטרפות" src="/api/qr?value=${encodeURIComponent(linkToRoom())}"><div class="join-link">${esc(linkToRoom())}</div><button class="btn tiny secondary margin-top" data-action="copy-link">העתק קישור</button></div><div class="divider"></div>` : ''}<h3>${state.phase === 'finished' ? 'הדירוג הסופי' : `משתתפים (${state.players.length})`}</h3>${scoreboard(state.players, true)}</section><section class="panel space-top"><h3>כלי מנהל</h3><button class="btn secondary tiny" data-action="fullscreen">מסך מלא</button>${showQr ? `<div class="divider"></div><label class="label" for="base-url">כתובת להצטרפות (ל־QR)</label><div class="form-row"><input class="input" id="base-url" value="${esc(inviteBase)}" placeholder="http://192.168.1.10:3000"><button class="btn tiny outline" data-action="update-url">עדכן</button></div><p class="muted-list">אם הטלפונים לא פותחים את הקישור, ודאו שיש להם חיבור לאינטרנט ושהכתובת מתחילה ב־https://.</p>` : ''}</section></aside></div><div class="footer">מה הרוב? • אין צורך באפליקציה • הסבב מתקדם לפי החלטת המנחה</div>`;
+    const sidebar = `<aside><section class="panel"><h2>${showQr ? 'הצטרפות למשחק' : 'טבלת המובילים'}</h2>${showQr ? `<div class="center"><div class="label">קוד החדר</div><div class="code">${esc(code)}</div><img class="qr" alt="קוד QR להצטרפות" src="/api/qr?value=${encodeURIComponent(linkToRoom())}"><div class="join-link">${esc(linkToRoom())}</div><button class="btn tiny secondary margin-top" data-action="copy-link">העתק קישור</button></div><div class="divider"></div>` : ''}<h3>${state.phase === 'finished' ? 'הדירוג הסופי' : `משתתפים (${state.players.length})`}</h3>${scoreboard(state.players, true)}</section><section class="panel space-top"><h3>כלי מנהל</h3><button class="btn secondary tiny" data-action="fullscreen">מסך מלא</button>${showQr ? `<div class="divider"></div><label class="label" for="base-url">כתובת להצטרפות (ל־QR)</label><div class="form-row"><input class="input" id="base-url" value="${esc(inviteBase)}" placeholder="http://192.168.1.10:3000"><button class="btn tiny outline" data-action="update-url">עדכן</button></div><p class="muted-list">אם הטלפונים לא פותחים את הקישור, ודאו שיש להם חיבור לאינטרנט ושהכתובת מתחילה ב־https://.</p>` : ''}</section></aside></div><div class="footer">מה הרוב? • אין צורך באפליקציה • הצבעה והימור: דקה לכל שלב • מעבר אוטומטי</div>`;
     return left + sidebar;
   }
   function playerView() {
@@ -109,7 +122,7 @@
     if (state.phase === 'waiting') {
       content = `<div class="welcome-box"><div class="eyebrow">ברוכים הבאים</div><h1 style="font-size:31px;margin:0 0 9px">${esc(playerName)}, אתם במשחק! 🎉</h1><div class="text-muted">המנחה יתחיל את המשחק כשכולם יהיו מוכנים.</div></div><div class="between"><span>משתתפים בחדר</span><b>${state.players.length}</b></div><div class="note margin-top">בכל סבב קודם בוחרים אפשרות, אחר כך מנחשים כמה בחרו באפשרות א׳. הניקוד נקבע לפי דיוק ההימור.</div>`;
     } else if (state.phase === 'voting') {
-      content = votingPanel(false, myState.vote) + `<div class="note margin-top">${myState.vote ? '✓ הבחירה נשמרה! אפשר לשנות אותה עד שהמנחה יסגור את ההצבעה.' : 'בחרו לפי ההעדפה האישית שלכם. בינתיים אף אחד לא רואה את התפלגות התשובות.'}</div>`;
+      content = votingPanel(false, myState.vote) + `<div class="note margin-top">${myState.vote ? '✓ הבחירה נשמרה! אפשר לשנות אותה עד שתסתיים הדקה.' : 'בחרו לפי ההעדפה האישית שלכם. בינתיים אף אחד לא רואה את התפלגות התשובות.'}</div>`;
     } else if (state.phase === 'guessing') {
       const n = state.guessTotal;
       if (!myState.vote) {
@@ -117,7 +130,7 @@
       } else {
         if (guessValue === null) guessValue = Number.isInteger(myState.guess) ? myState.guess : Math.round(n / 2);
         guessValue = Math.min(n, Math.max(0, guessValue));
-        content = `<div class="eyebrow">זמן להמר</div><div class="question">כמה מתוך ${n} בחרו ב־<span style="color:var(--purple)">${esc(state.question.a)}</span>?</div><div class="guess-val" id="guess-number">${guessValue}</div><div class="guess-caption" id="guess-caption">מתוך ${n} מצביעים (${n ? Math.round(100 * guessValue / n) : 0}%)</div><input class="slider" type="range" min="0" max="${n}" value="${guessValue}" step="1" id="guess-slider" aria-label="ההימור על מספר האנשים שבחרו באפשרות א׳"><div class="between"><span class="small">0 בחרו בא׳</span><span class="small">כולם בחרו בא׳</span></div><button class="btn mint full margin-top" data-action="guess">${Number.isInteger(myState.guess) ? 'עדכן הימור' : 'שלח הימור'}</button><div class="note margin-top">${Number.isInteger(myState.guess) ? `✓ ניחוש שמור: ${myState.guess} מתוך ${n}. אפשר לשנות עד חשיפת התוצאות.` : 'ההתפלגות עדיין מוסתרת. הניחוש יכול להיות בין 0 למספר המצביעים.'}</div>`;
+        content = `<div class="eyebrow">זמן להמר</div><div class="question">כמה מתוך ${n} בחרו ב־<span style="color:var(--purple)">${esc(state.question.a)}</span>?</div><div class="guess-val" id="guess-number">${guessValue}</div><div class="guess-caption" id="guess-caption">מתוך ${n} מצביעים (${n ? Math.round(100 * guessValue / n) : 0}%)</div><input class="slider" type="range" min="0" max="${n}" value="${guessValue}" step="1" id="guess-slider" aria-label="ההימור על מספר האנשים שבחרו באפשרות א׳"><div class="between"><span class="small">0 בחרו בא׳</span><span class="small">כולם בחרו בא׳</span></div><button class="btn mint full margin-top" data-action="guess">${Number.isInteger(myState.guess) ? 'עדכן הימור' : 'שלח הימור'}</button><div class="note margin-top">${Number.isInteger(myState.guess) ? `✓ ניחוש שמור: ${myState.guess} מתוך ${n}. אפשר לשנות עד תום הדקה.` : 'ההתפלגות עדיין מוסתרת. הניחוש יכול להיות בין 0 למספר המצביעים.'}</div>`;
       }
     } else if (state.phase === 'results') {
       content = `<div class="question">${esc(state.question.question)}</div>${resultPanel()}${Number.isInteger(myState.guess) ? `<div class="welcome-box margin-top"><div class="label">הניחוש שלכם: ${myState.guess} בחרו בא׳</div><div class="big-number">+${myState.earned}</div><div>נקודות בסבב הזה</div></div>` : `<div class="note margin-top">לא הוגש ניחוש בסבב הזה.</div>`}<div class="between"><b>סה״כ ניקוד אישי</b><span class="score">${myState.score}</span></div><div class="note margin-top">ממתינים לשאלה הבאה מהמנחה…</div>`;
@@ -127,7 +140,7 @@
     }
     return `${head}${content}</section>${state.phase !== 'finished' && state.phase !== 'waiting' ? `<section class="panel space-top"><div class="between"><span class="small">${esc(playerName)}</span><b class="score">${myState.score} נק׳</b></div></section>` : ''}</main>`;
   }
-  function render() { app.innerHTML = isHost ? hostView() : playerView(); }
+  function render() { app.innerHTML = isHost ? hostView() : playerView(); updateCountdown(); }
 
   async function restore() {
     if (isHost) {
@@ -160,6 +173,7 @@
     const prevPhase = state?.phase;
     const prevIndex = state?.index;
     state = next;
+    if (Number.isFinite(next.serverNow)) serverOffsetMs = Date.now() - next.serverNow;
     if (next.index !== prevIndex || next.phase !== prevPhase) guessValue = null;
     render();
   });
@@ -197,7 +211,7 @@
     if (event.target.id === 'guess-slider') {
       guessValue = Number(event.target.value);
       $('#guess-number').textContent = guessValue;
-      $('#guess-caption').textContent = `מתוך ${state.guessTotal} מצביעים (${Math.round(100 * guessValue / state.guessTotal)}%)`;
+      $('#guess-caption').textContent = `מתוך ${state.guessTotal} מצביעים (${state.guessTotal ? Math.round(100 * guessValue / state.guessTotal) : 0}%)`;
     }
   });
 

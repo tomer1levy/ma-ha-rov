@@ -13,6 +13,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e5 });
 const rooms = new Map();
+const PHASE_LENGTH_MS = 60 * 1000; // 60 seconds for both voting and guessing
 
 const DEFAULT_QUESTIONS = [
   { question: 'מה עדיף?', a: 'להיות קרח', b: 'לשתות בקבוק קטשופ בכל יום' },
@@ -74,6 +75,9 @@ function publicState(room) {
   return {
     code: room.code,
     phase: room.phase,
+    phaseEndsAt: room.phaseEndsAt ?? null,
+    phaseDurationMs: room.phaseEndsAt ? PHASE_LENGTH_MS : null,
+    serverNow: Date.now(),
     index: room.index,
     round: room.index + 1,
     totalRounds: room.questions.length,
@@ -114,6 +118,45 @@ function broadcast(room) {
   }
   io.to(`host:${room.code}`).emit('host:questions', room.questions);
 }
+function clearPhaseTimer(room) {
+  if (room.phaseTimer) clearTimeout(room.phaseTimer);
+  room.phaseTimer = null;
+  room.phaseEndsAt = null;
+}
+function startTimedPhase(room, phase) {
+  clearPhaseTimer(room);
+  room.phase = phase;
+  room.phaseEndsAt = Date.now() + PHASE_LENGTH_MS;
+  const roundIndex = room.index;
+  room.phaseTimer = setTimeout(() => {
+    if (room.index !== roundIndex || room.phase !== phase) return;
+    if (phase === 'voting') closeVoting(room);
+    else revealResults(room);
+  }, PHASE_LENGTH_MS);
+  room.phaseTimer.unref?.();
+}
+function closeVoting(room) {
+  if (room.phase !== 'voting') return;
+  startTimedPhase(room, 'guessing');
+  broadcast(room);
+}
+function pointsForGuess(guess, actual) {
+  if (!Number.isInteger(guess)) return 0;
+  return [30, 10, 5, 2][Math.abs(guess - actual)] || 0;
+}
+function revealResults(room) {
+  if (room.phase !== 'guessing') return;
+  const votes = votesOf(room);
+  const countA = votes.filter(p => p.vote === 'a').length;
+  for (const player of room.players.values()) {
+    player.earned = pointsForGuess(player.guess, countA);
+    player.score += player.earned;
+  }
+  clearPhaseTimer(room);
+  room.phase = 'results';
+  broadcast(room);
+}
+
 function setAssociation(socket, room, role, player) {
   if (socket.data?.roomCode) socket.leave(socket.data.roomCode);
   if (socket.data?.role === 'host') socket.leave(`host:${socket.data.roomCode}`);
@@ -163,7 +206,7 @@ io.on('connection', socket => {
       code,
       hostToken: crypto.randomBytes(24).toString('hex'),
       questions: DEFAULT_QUESTIONS.map(q => ({ ...q })),
-      phase: 'waiting', index: -1,
+      phase: 'waiting', index: -1, phaseEndsAt: null, phaseTimer: null,
       players: new Map(),
       createdAt: Date.now(), updatedAt: Date.now()
     };
@@ -216,13 +259,14 @@ io.on('connection', socket => {
     if (!isHost(socket, room)) return err(ack, 'אין הרשאת ניהול.');
     if (room.phase !== 'waiting' && room.phase !== 'results') return err(ack, 'כבר מתנהל סבב.');
     if (room.index + 1 >= room.questions.length) {
+      clearPhaseTimer(room);
       room.phase = 'finished';
     } else {
       room.index++;
-      room.phase = 'voting';
       for (const p of room.players.values()) {
         p.vote = null; p.guess = null; p.earned = 0;
       }
+      startTimedPhase(room, 'voting');
     }
     success(ack);
     broadcast(room);
@@ -233,6 +277,7 @@ io.on('connection', socket => {
     const player = asPlayer(socket, room);
     if (!player) return err(ack, 'צריך להצטרף למשחק מחדש.');
     if (room.phase !== 'voting') return err(ack, 'ההצבעה לשאלה זו הסתיימה.');
+    if (Date.now() >= room.phaseEndsAt) { closeVoting(room); return err(ack, 'זמן ההצבעה הסתיים.'); }
     if (choice !== 'a' && choice !== 'b') return err(ack, 'בחירה לא תקינה.');
     player.vote = choice;
     success(ack);
@@ -244,9 +289,8 @@ io.on('connection', socket => {
     if (!isHost(socket, room)) return err(ack, 'אין הרשאת ניהול.');
     if (room.phase !== 'voting') return err(ack, 'לא ניתן לסגור כעת את ההצבעה.');
     if (votesOf(room).length === 0) return err(ack, 'עדיין לא הצביע אף משתתף.');
-    room.phase = 'guessing';
+    closeVoting(room);
     success(ack);
-    broadcast(room);
   });
 
   socket.on('player:guess', ({ code, guess } = {}, ack) => {
@@ -254,6 +298,7 @@ io.on('connection', socket => {
     const player = asPlayer(socket, room);
     if (!player) return err(ack, 'צריך להצטרף למשחק מחדש.');
     if (room.phase !== 'guessing') return err(ack, 'שלב הניחושים אינו פתוח.');
+    if (Date.now() >= room.phaseEndsAt) { revealResults(room); return err(ack, 'זמן ההימור הסתיים.'); }
     if (!player.vote) return err(ack, 'רק מי שהצביע בסבב יכול להמר.');
     if (!Number.isInteger(guess) || guess < 0 || guess > votesOf(room).length) return err(ack, 'הניחוש חייב להיות מספר משתתפים חוקי.');
     player.guess = guess;
@@ -265,23 +310,15 @@ io.on('connection', socket => {
     const room = getRoom(code);
     if (!isHost(socket, room)) return err(ack, 'אין הרשאת ניהול.');
     if (room.phase !== 'guessing') return err(ack, 'לא ניתן לחשוף תוצאות כעת.');
-    const votes = votesOf(room);
-    const countA = votes.filter(p => p.vote === 'a').length;
-    for (const player of room.players.values()) {
-      player.earned = Number.isInteger(player.guess)
-        ? Math.max(0, Math.round(100 - 250 * Math.abs(player.guess - countA) / votes.length))
-        : 0;
-      player.score += player.earned;
-    }
-    room.phase = 'results';
+    revealResults(room);
     success(ack);
-    broadcast(room);
   });
 
   socket.on('host:restart', ({ code } = {}, ack) => {
     const room = getRoom(code);
     if (!isHost(socket, room)) return err(ack, 'אין הרשאת ניהול.');
     if (room.phase !== 'finished') return err(ack, 'אפשר לפתוח משחק חדש רק לאחר הסיום.');
+    clearPhaseTimer(room);
     room.phase = 'waiting'; room.index = -1;
     for (const p of room.players.values()) { p.score = 0; p.earned = 0; p.vote = null; p.guess = null; }
     success(ack);
@@ -301,7 +338,10 @@ io.on('connection', socket => {
 const cleanup = setInterval(() => {
   const oldest = Date.now() - 24 * 60 * 60 * 1000;
   for (const [code, room] of rooms) {
-    if (room.updatedAt < oldest) rooms.delete(code);
+    if (room.updatedAt < oldest) {
+      clearPhaseTimer(room);
+      rooms.delete(code);
+    }
   }
 }, 60 * 60 * 1000);
 cleanup.unref();
