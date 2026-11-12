@@ -14,7 +14,7 @@
   let myState = null;
   let questions = null;
   let editing = false;
-  let draft = '';
+  let draftQuestions = [];
   let guessValue = null;
   let inviteBase = window.location.origin;
   let socketOnline = false;
@@ -75,7 +75,7 @@
   function progress() {
     const label = { waiting: 'חדר המתנה', voting: 'בחירה אישית', guessing: 'הימור על התוצאות', results: 'חשיפת תוצאות', finished: 'סיום המשחק' }[state.phase];
     const seq = state.phase === 'waiting' ? 0 : state.phase === 'voting' ? 1 : state.phase === 'guessing' ? 2 : 3;
-    const countdown = state.phaseEndsAt ? `<div class="countdown"><div class="countdown-heading"><b>${state.phase === 'voting' ? 'נותר להצבעה' : 'נותר להימור'}</b><strong id="stage-timer" class="countdown-value" aria-label="זמן שנותר">1:00</strong></div><div class="countdown-track"><div id="stage-progress" class="countdown-fill"></div></div><div class="small text-muted">בתום הזמן המשחק ימשיך אוטומטית</div></div>` : '';
+    const countdown = state.phaseEndsAt ? `<div class="countdown"><div class="countdown-heading"><b>${state.phase === 'voting' ? 'נותר להצבעה' : 'נותר להימור'}</b><strong id="stage-timer" class="countdown-value" aria-label="זמן שנותר">1:00</strong></div><div class="countdown-track"><div id="stage-progress" class="countdown-fill"></div></div><div class="small text-muted">השלב מתקדם כשכולם ענו או כשהזמן נגמר</div></div>` : '';
     return `<div class="round-head"><div><div class="eyebrow">${state.phase === 'waiting' ? 'מתארגנים' : `סבב ${state.round} מתוך ${state.totalRounds}`}</div><span class="text-muted">${label}</span></div><div class="steps">${['בוחרים', 'מהמרים', 'מגלים'].map((x, i) => `<span class="step ${i + 1 === seq ? 'current' : i + 1 < seq ? 'done' : ''}">${x}</span>`).join('')}</div></div>${countdown}`;
   }
   function resultPanel() {
@@ -86,6 +86,19 @@
   }
   function votingPanel(disabled = false, selected = null) {
     return `<div class="question">${esc(state.question.question)}</div><div class="choices"><button type="button" data-action="vote" data-choice="a" class="choice ${selected === 'a' ? 'active' : ''}" ${disabled ? 'disabled' : ''}><small>אפשרות א׳</small>${esc(state.question.a)}</button><button type="button" data-action="vote" data-choice="b" class="choice ${selected === 'b' ? 'active' : ''}" ${disabled ? 'disabled' : ''}><small>אפשרות ב׳</small>${esc(state.question.b)}</button></div>`;
+  }
+  function questionEditor() {
+    const cards = draftQuestions.map((q, i) => `<article class="question-editor" data-question-number="${i + 1}">
+      <div class="question-editor-head"><span class="question-editor-number">שאלה ${i + 1}</span><button type="button" class="btn tiny danger" data-action="remove-question" data-index="${i}" aria-label="מחק שאלה ${i + 1}">מחק שאלה</button></div>
+      <div class="question-editor-field"><label class="label" for="edit-question-${i}">נוסח השאלה</label><input id="edit-question-${i}" class="input" data-edit-index="${i}" data-edit-field="question" maxlength="180" value="${esc(q.question)}" placeholder="לדוגמה: מה עדיף?" /></div>
+      <div class="question-editor-options">
+        <div class="question-editor-field"><label class="label" for="edit-a-${i}">אפשרות א׳</label><input id="edit-a-${i}" class="input" data-edit-index="${i}" data-edit-field="a" maxlength="160" value="${esc(q.a)}" placeholder="אפשרות ראשונה" /></div>
+        <div class="question-editor-field"><label class="label" for="edit-b-${i}">אפשרות ב׳</label><input id="edit-b-${i}" class="input" data-edit-index="${i}" data-edit-field="b" maxlength="160" value="${esc(q.b)}" placeholder="אפשרות שנייה" /></div>
+      </div>
+    </article>`).join('');
+    return `<div class="question-editor-list">${cards || '<p class="note">עדיין אין שאלות. הוסיפו שאלה באמצעות הכפתור למטה.</p>'}</div>
+      <div class="question-editor-actions"><button class="btn secondary" type="button" data-action="add-question" ${draftQuestions.length >= 100 ? 'disabled' : ''}><span aria-hidden="true">＋</span> הוסף שאלה</button><button class="btn mint" type="button" data-action="save-questions" ${!draftQuestions.length ? 'disabled' : ''}>שמור את כל השאלות</button></div>
+      <p class="small">ניתן לערוך כל שאלה בנפרד, להוסיף עד 100 שאלות ולמחוק שאלות קיימות. השינויים ייכנסו לתוקף לאחר שמירה.</p>`;
   }
   function hostView() {
     if (!code || !state) {
@@ -99,18 +112,18 @@
     if (isWaiting) {
       main = `<div class="eyebrow">כולם בפנים?</div><h1 class="hero">מוכנים לגלות<br>מה הרוב חושב?</h1><p class="lead">תנו לכולם לסרוק את הקוד ולהצטרף. לאחר מכן התחילו את המשחק.</p><div class="pills"><span class="pill">${plural(state.players.length, 'משתתף', 'משתתפים')} בחדר</span><span class="pill">${plural(state.totalRounds, 'שאלה', 'שאלות')}</span></div><div class="space-top"><button class="btn" data-action="next">התחל משחק <span aria-hidden="true">←</span></button></div>`;
     } else if (state.phase === 'voting') {
-      main = votingPanel(true) + `<div class="space-top"><div class="between"><b>הצביעו: ${state.votedCount} / ${state.players.length}</b><span class="small">המעבר אוטומטי כעבור דקה</span></div><div class="progress"><div class="progress-fill" style="width:${state.players.length ? (100 * state.votedCount / state.players.length) : 0}%"></div></div><p class="small text-muted">עם סיום הדקה שלב ההימור יתחיל אוטומטית.</p></div>`;
+      main = votingPanel(true) + `<div class="space-top"><div class="between"><b>הצביעו: ${state.votedCount} / ${state.players.length}</b><span class="small">עוברים כשכולם מצביעים או בתום הדקה</span></div><div class="progress"><div class="progress-fill" style="width:${state.players.length ? (100 * state.votedCount / state.players.length) : 0}%"></div></div><p class="small text-muted">כשכולם יצביעו (או בתום הדקה) שלב ההימור יתחיל אוטומטית.</p></div>`;
     } else if (state.phase === 'guessing') {
-      main = `<div class="eyebrow">ההצבעות נסגרו — התוצאות עדיין סודיות</div><div class="question">כמה מתוך ${state.guessTotal} הצביעו ל־<span style="color:var(--purple)">${esc(state.question.a)}</span>?</div><p class="lead">כל משתתף מהמר על מספר האנשים שבחרו באפשרות א׳.</p><div class="between"><b>שלחו הימור: ${state.guessCount} / ${state.guessTotal}</b><span class="small">ההימור נשאר סודי</span></div><div class="progress"><div class="progress-fill" style="width:${state.guessTotal ? 100 * state.guessCount / state.guessTotal : 0}%"></div></div><p class="small text-muted">התוצאות והניקוד ייחשפו אוטומטית בסיום הדקה.</p>`;
+      main = `<div class="eyebrow">ההצבעות נסגרו — התוצאות עדיין סודיות</div><div class="question">כמה מתוך ${state.guessTotal} הצביעו ל־<span style="color:var(--purple)">${esc(state.question.a)}</span>?</div><p class="lead">כל משתתף מהמר על מספר האנשים שבחרו באפשרות א׳.</p><div class="between"><b>שלחו הימור: ${state.guessCount} / ${state.guessTotal}</b><span class="small">ההימור נשאר סודי</span></div><div class="progress"><div class="progress-fill" style="width:${state.guessTotal ? 100 * state.guessCount / state.guessTotal : 0}%"></div></div><p class="small text-muted">התוצאות ייחשפו כשכל המצביעים יהמרו, או בתום הדקה.</p>`;
     } else if (state.phase === 'results') {
       main = `<div class="question">${esc(state.question.question)}</div>${resultPanel()}<button class="btn full space-top" data-action="next">${state.index + 1 >= state.totalRounds ? 'הצג תוצאות סופיות' : 'לשאלה הבאה ←'}</button>`;
     } else {
       const winners = state.players.length ? state.players.filter(p => p.score === state.players[0].score) : [];
       main = `<div class="eyebrow">סיימנו!</div><div class="winner">🏆 ${winners.length ? esc(winners.map(p => p.name).join(' ו־')) : 'המשחק הסתיים'}</div><p class="lead">${winners.length ? `עם ${winners[0].score} נקודות. ` : ''}הנה טבלת הדירוג הסופית.</p>${scoreboard(state.players)}<button class="btn secondary margin-top" data-action="restart">משחק חדש עם אותם משתתפים</button>`;
     }
-    const left = `${base}${main}</section>${isWaiting ? `<section class="panel space-top"><div class="between"><h3>שאלות המשחק</h3><button class="btn tiny secondary" data-action="toggle-edit">${editing ? 'סגור עריכה' : 'ערוך שאלות'}</button></div>${editing ? `<p class="small">שאלה אחת בכל שורה, בפורמט: שאלה | אפשרות א׳ | אפשרות ב׳. אפשר לשים עד 100 שאלות.</p><textarea id="questions-draft" class="textarea" spellcheck="false">${esc(draft)}</textarea><div class="margin-top"><button class="btn tiny mint" data-action="save-questions">שמור שאלות</button></div>` : `<p class="small">${plural(state.totalRounds, 'שאלה מוכנה', 'שאלות מוכנות')}. אפשר להחליף את כולן לפני שמתחילים.</p>`}</section>` : ''}</main>`;
+    const left = `${base}${main}</section>${isWaiting ? `<section class="panel space-top"><div class="between"><h3>שאלות המשחק</h3><button class="btn tiny secondary" data-action="toggle-edit">${editing ? 'סגור עריכה' : 'ערוך שאלות'}</button></div>${editing ? questionEditor() : `<p class="small">${plural(state.totalRounds, 'שאלה מוכנה', 'שאלות מוכנות')}. אפשר לערוך, להוסיף ולמחוק שאלות לפני שמתחילים.</p>`}</section>` : ''}</main>`;
     const showQr = state.phase === 'waiting' || state.phase === 'voting';
-    const sidebar = `<aside><section class="panel"><h2>${showQr ? 'הצטרפות למשחק' : 'טבלת המובילים'}</h2>${showQr ? `<div class="center"><div class="label">קוד החדר</div><div class="code">${esc(code)}</div><img class="qr" alt="קוד QR להצטרפות" src="/api/qr?value=${encodeURIComponent(linkToRoom())}"><div class="join-link">${esc(linkToRoom())}</div><button class="btn tiny secondary margin-top" data-action="copy-link">העתק קישור</button></div><div class="divider"></div>` : ''}<h3>${state.phase === 'finished' ? 'הדירוג הסופי' : `משתתפים (${state.players.length})`}</h3>${scoreboard(state.players, true)}</section><section class="panel space-top"><h3>כלי מנהל</h3><button class="btn secondary tiny" data-action="fullscreen">מסך מלא</button>${showQr ? `<div class="divider"></div><label class="label" for="base-url">כתובת להצטרפות (ל־QR)</label><div class="form-row"><input class="input" id="base-url" value="${esc(inviteBase)}" placeholder="http://192.168.1.10:3000"><button class="btn tiny outline" data-action="update-url">עדכן</button></div><p class="muted-list">אם הטלפונים לא פותחים את הקישור, ודאו שיש להם חיבור לאינטרנט ושהכתובת מתחילה ב־https://.</p>` : ''}</section></aside></div><div class="footer">מה הרוב? • אין צורך באפליקציה • הצבעה והימור: דקה לכל שלב • מעבר אוטומטי</div>`;
+    const sidebar = `<aside><section class="panel"><h2>${showQr ? 'הצטרפות למשחק' : 'טבלת המובילים'}</h2>${showQr ? `<div class="center"><div class="label">קוד החדר</div><div class="code">${esc(code)}</div><img class="qr" alt="קוד QR להצטרפות" src="/api/qr?value=${encodeURIComponent(linkToRoom())}"><div class="join-link">${esc(linkToRoom())}</div><button class="btn tiny secondary margin-top" data-action="copy-link">העתק קישור</button></div><div class="divider"></div>` : ''}<h3>${state.phase === 'finished' ? 'הדירוג הסופי' : `משתתפים (${state.players.length})`}</h3>${scoreboard(state.players, true)}</section><section class="panel space-top"><h3>כלי מנהל</h3><button class="btn secondary tiny" data-action="fullscreen">מסך מלא</button>${showQr ? `<div class="divider"></div><label class="label" for="base-url">כתובת להצטרפות (ל־QR)</label><div class="form-row"><input class="input" id="base-url" value="${esc(inviteBase)}" placeholder="http://192.168.1.10:3000"><button class="btn tiny outline" data-action="update-url">עדכן</button></div><p class="muted-list">אם הטלפונים לא פותחים את הקישור, ודאו שיש להם חיבור לאינטרנט ושהכתובת מתחילה ב־https://.</p>` : ''}</section></aside></div><div class="footer">מה הרוב? • אין צורך באפליקציה • הצבעה והימור: עד דקה לכל שלב • מעבר אוטומטי</div>`;
     return left + sidebar;
   }
   function playerView() {
@@ -140,7 +153,21 @@
     }
     return `${head}${content}</section>${state.phase !== 'finished' && state.phase !== 'waiting' ? `<section class="panel space-top"><div class="between"><span class="small">${esc(playerName)}</span><b class="score">${myState.score} נק׳</b></div></section>` : ''}</main>`;
   }
-  function render() { app.innerHTML = isHost ? hostView() : playerView(); updateCountdown(); }
+  function render() {
+    const active = document.activeElement;
+    const editId = isHost && editing && active?.dataset?.editField ? active.id : null;
+    const caret = editId ? active.selectionStart : null;
+    const caretEnd = editId ? active.selectionEnd : null;
+    app.innerHTML = isHost ? hostView() : playerView();
+    if (editId) {
+      const restored = document.getElementById(editId);
+      if (restored) {
+        restored.focus({ preventScroll: true });
+        if (caret !== null) restored.setSelectionRange(caret, caretEnd);
+      }
+    }
+    updateCountdown();
+  }
 
   async function restore() {
     if (isHost) {
@@ -185,7 +212,7 @@
   });
   socket.on('host:questions', next => {
     questions = next;
-    if (!editing) draft = next.map(q => `${q.question} | ${q.a} | ${q.b}`).join('\n');
+    if (!editing) draftQuestions = next.map(q => ({ ...q }));
   });
 
   app.addEventListener('submit', async event => {
@@ -207,7 +234,11 @@
   });
 
   app.addEventListener('input', event => {
-    if (event.target.id === 'questions-draft') draft = event.target.value;
+    const field = event.target.dataset.editField;
+    const index = Number(event.target.dataset.editIndex);
+    if (editing && ['question', 'a', 'b'].includes(field) && Number.isInteger(index) && draftQuestions[index]) {
+      draftQuestions[index][field] = event.target.value;
+    }
     if (event.target.id === 'guess-slider') {
       guessValue = Number(event.target.value);
       $('#guess-number').textContent = guessValue;
@@ -233,17 +264,31 @@
       restore();
     } else if (action === 'toggle-edit') {
       editing = !editing;
-      if (editing && !draft && questions) draft = questions.map(q => `${q.question} | ${q.a} | ${q.b}`).join('\n');
+      if (editing) draftQuestions = (questions || []).map(q => ({ ...q }));
+      render();
+    } else if (action === 'add-question') {
+      if (draftQuestions.length >= 100) return toast('אפשר להוסיף עד 100 שאלות.');
+      draftQuestions.push({ question: '', a: '', b: '' });
+      render();
+      const input = $(`#edit-question-${draftQuestions.length - 1}`);
+      input?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      input?.focus({ preventScroll: true });
+    } else if (action === 'remove-question') {
+      const index = Number(control.dataset.index);
+      if (!Number.isInteger(index) || index < 0 || index >= draftQuestions.length) return;
+      draftQuestions.splice(index, 1);
       render();
     } else if (action === 'save-questions') {
-      const rows = draft.split('\n').map(s => s.trim()).filter(Boolean);
-      const parsed = rows.map(row => row.split('|').map(x => x.trim()));
-      if (!rows.length || parsed.some(items => items.length !== 3 || items.some(item => !item))) {
-        return toast('יש להזין שאלה אחת בכל שורה: שאלה | אפשרות א׳ | אפשרות ב׳');
+      if (!draftQuestions.length) return toast('צריך להוסיף לפחות שאלה אחת למשחק.');
+      const qs = draftQuestions.map(q => ({ question: q.question.trim(), a: q.a.trim(), b: q.b.trim() }));
+      const invalid = qs.findIndex(q => !q.question || !q.a || !q.b || q.a === q.b);
+      if (invalid >= 0) {
+        $(`#edit-question-${invalid}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return toast(`יש להשלים את שאלה ${invalid + 1} ולוודא ששתי האפשרויות שונות.`);
       }
-      const qs = parsed.map(([question, a, b]) => ({ question, a, b }));
       if (await act('host:questions:set', { code, questions: qs })) {
         editing = false;
+        draftQuestions = qs.map(q => ({ ...q }));
         toast(`${qs.length} שאלות נשמרו בהצלחה.`);
         render();
       }

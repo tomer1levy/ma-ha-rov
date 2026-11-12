@@ -10,3 +10,17 @@
 .countdown-value.urgent{color:#ffb675;}
 .countdown-track{height:9px;border-radius:20px;background:#343b56;overflow:hidden;margin-bottom:8px;}
 .countdown-fill{width:100%;height:100%;background:linear-gradient(90deg,#a78bfa,#5eead4);transition:width .18s linear;}
+
+/* Independent question cards in the host editor */
+.question-editor-list{display:grid;gap:16px;margin-top:20px}
+.question-editor{padding:18px;background:#10182e;border:1px solid #3a4668;border-radius:17px}
+.question-editor-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+.question-editor-number{font-weight:900;font-size:18px;color:#eee9ff}
+.question-editor-field{min-width:0}
+.question-editor-field .label{margin-bottom:7px}
+.question-editor-field .input{background:#0b1226}
+.question-editor-options{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:13px}
+.question-editor-actions{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 10px}
+.btn.danger{background:#34202c;color:#ffc9d3;border:1px solid #774052}
+.btn.danger:hover:not(:disabled){background:#512836}
+@media(max-width:560px){.question-editor-options{grid-template-columns:1fr}.question-editor-actions .btn{flex:1 1 100%}.question-editor{padding:14px}}

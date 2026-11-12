@@ -248,7 +248,7 @@ io.on('connection', socket => {
     if (!isHost(socket, room)) return err(ack, 'אין הרשאת ניהול.');
     if (room.phase !== 'waiting') return err(ack, 'אפשר לערוך את השאלות רק לפני תחילת המשחק.');
     const valid = validateQuestions(questions);
-    if (!valid) return err(ack, 'רשימת שאלות לא תקינה. כל שורה צריכה להכיל שאלה ושתי תשובות שונות.');
+    if (!valid) return err(ack, 'רשימת השאלות אינה תקינה. יש להזין נוסח שאלה ושתי אפשרויות שונות לכל שאלה.');
     room.questions = valid;
     success(ack, { count: valid.length });
     broadcast(room);
@@ -281,7 +281,9 @@ io.on('connection', socket => {
     if (choice !== 'a' && choice !== 'b') return err(ack, 'בחירה לא תקינה.');
     player.vote = choice;
     success(ack);
-    broadcast(room);
+    // A positive number of votes must equal the full registered room.
+    if (room.players.size > 0 && votesOf(room).length === room.players.size) closeVoting(room);
+    else broadcast(room);
   });
 
   socket.on('host:lock', ({ code } = {}, ack) => {
@@ -303,7 +305,10 @@ io.on('connection', socket => {
     if (!Number.isInteger(guess) || guess < 0 || guess > votesOf(room).length) return err(ack, 'הניחוש חייב להיות מספר משתתפים חוקי.');
     player.guess = guess;
     success(ack);
-    broadcast(room);
+    // Only people who voted are eligible to guess.
+    const eligible = votesOf(room);
+    if (eligible.length > 0 && eligible.every(p => Number.isInteger(p.guess))) revealResults(room);
+    else broadcast(room);
   });
 
   socket.on('host:reveal', ({ code } = {}, ack) => {
