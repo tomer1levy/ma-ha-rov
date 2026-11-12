@@ -69,6 +69,9 @@ const created = host.send('host:create', {});
 assert.equal(created.ok, true);
 const code = created.code;
 assert.equal(host.getState().phase, 'waiting');
+assert.equal(host.getState().totalRounds, 20, 'Twenty birthday dilemmas available by default');
+assert.ok(host.getState().players.length === 0);
+assert.match(host.getState().question?.question || '', /^$/, 'No question before start');
 const players = ['איתי','רוני','מיכל','ערן','רותם'].map(name => {
   const p = connect();
   const response = p.send('player:join', { code, name });
@@ -82,6 +85,7 @@ const editedQuestions = [
   { question: 'מה עדיף?', a: 'א', b: 'ב' },
   { question: 'שאלה שנייה?', a: 'כן', b: 'לא' }
 ];
+assert.equal(host.send('host:questions:set', { code, questions: [{ question: 'שאלה '.repeat(50), a: 'א', b: 'ב' }] }).ok, true, 'Long narratives accepted');
 assert.equal(host.send('host:questions:set', { code, questions: editedQuestions }).ok, true);
 assert.equal(host.getState().totalRounds, 2);
 assert.equal(host.send('host:questions:set', { code, questions: [] }).ok, false);

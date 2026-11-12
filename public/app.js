@@ -90,7 +90,7 @@
   function questionEditor() {
     const cards = draftQuestions.map((q, i) => `<article class="question-editor" data-question-number="${i + 1}">
       <div class="question-editor-head"><span class="question-editor-number">שאלה ${i + 1}</span><button type="button" class="btn tiny danger" data-action="remove-question" data-index="${i}" aria-label="מחק שאלה ${i + 1}">מחק שאלה</button></div>
-      <div class="question-editor-field"><label class="label" for="edit-question-${i}">נוסח השאלה</label><input id="edit-question-${i}" class="input" data-edit-index="${i}" data-edit-field="question" maxlength="180" value="${esc(q.question)}" placeholder="לדוגמה: מה עדיף?" /></div>
+      <div class="question-editor-field"><label class="label" for="edit-question-${i}">נוסח השאלה</label><textarea id="edit-question-${i}" class="textarea" data-edit-index="${i}" data-edit-field="question" maxlength="800" rows="4" placeholder="לדוגמה: מה עדיף?">${esc(q.question)}</textarea></div>
       <div class="question-editor-options">
         <div class="question-editor-field"><label class="label" for="edit-a-${i}">אפשרות א׳</label><input id="edit-a-${i}" class="input" data-edit-index="${i}" data-edit-field="a" maxlength="160" value="${esc(q.a)}" placeholder="אפשרות ראשונה" /></div>
         <div class="question-editor-field"><label class="label" for="edit-b-${i}">אפשרות ב׳</label><input id="edit-b-${i}" class="input" data-edit-index="${i}" data-edit-field="b" maxlength="160" value="${esc(q.b)}" placeholder="אפשרות שנייה" /></div>
